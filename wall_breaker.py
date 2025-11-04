@@ -117,55 +117,70 @@ class Paddle:
 class Ball:
     """ ボールのクラス """
     def __init__(self):
-        # ボールのRectをラケットの少し上に作成
+        # ... (既存の rect, vx, vy, speed の設定はそのまま) ...
         self.rect = pg.Rect(
             SCREEN_WIDTH // 2 - BALL_RADIUS, 
             SCREEN_HEIGHT - PADDLE_HEIGHT - 50, 
             BALL_RADIUS * 2, 
             BALL_RADIUS * 2
         )
-        # ボールの速度（x方向, y方向）
         self.vx = random.choice([-5, 5])
         self.vy = -5
         self.speed = 5
+
+        # --- ▼ アイテム効果用の変数を追加 ▼ ---
+        self.penetrate = False # 貫通状態か
+        self.penetrate_timer = 0 # 貫通の持続時間タイマー
+        self.is_large = False  # 巨大化状態か
+        self.large_timer = 0   # 巨大化の持続時間タイマー
+        # --- ▲ -------------------------- ▲ ---
 
     def update(self, paddle, blocks, particles, break_sound=None):
         """ ボールの移動と衝突判定 """
         self.rect.move_ip(self.vx, self.vy)
 
-        # 壁との衝突判定 (上)
+        # ... (壁との衝突判定 (上) はそのまま) ...
         if self.rect.top < 0:
-            self.vy *= -1 # Y方向の速度を反転
+            self.vy *= -1 
             self.rect.top = 0
 
-        # 壁との衝突判定 (左・右)
+        # ... (壁との衝突判定 (左・右) はそのまま) ...
         if self.rect.left < 0 or self.rect.right > SCREEN_WIDTH:
-            self.vx *= -1 # X方向の速度を反転
+            self.vx *= -1
             if self.rect.left < 0: self.rect.left = 0
             if self.rect.right > SCREEN_WIDTH: self.rect.right = SCREEN_WIDTH
 
         # ラケットとの衝突判定
         if self.rect.colliderect(paddle.rect):
-            self.vy *= -1 # Y方向の速度を反転
-            self.rect.bottom = paddle.rect.top # めり込まないように位置調整
+            self.vy *= -1 
+            self.rect.bottom = paddle.rect.top 
             
-            # ラケットの当たった位置で反射角度を変える（簡易的）
             center_diff = self.rect.centerx - paddle.rect.centerx
             self.vx = (center_diff / (PADDLE_WIDTH / 2)) * self.speed
-            # vxが0に近すぎるとループするので最小値を設定
             if abs(self.vx) < 1:
                 self.vx = 1 if self.vx >= 0 else -1
 
+            # --- ▼ 貫通アイテムの効果がラケットで切れるようにする（任意）▼ ---
+            # if self.penetrate:
+            #     self.set_penetrate(False) # ラケットに当たったら貫通解除する場合
+            # --- ▲ --------------------------------------------------- ▲ ---
+
 
         # ブロックとの衝突判定
-        collided_block = self.rect.collidelist(blocks) # どのブロックと衝突したか
-        if collided_block != -1: # -1以外は衝突
+        collided_block = self.rect.collidelist(blocks) 
+        if collided_block != -1: 
             block = blocks.pop(collided_block) # 衝突したブロックをリストから削除
             
-            # ボールの反射処理（簡易的にY方向のみ反転）
-            # 実際にはブロックの上下左右どこに当たったか判定すべきだが簡略化
-            self.vy *= -1
+            # --- ▼ 貫通状態の処理 ▼ ---
+            if self.penetrate:
+                # 貫通状態なら反射しない (ブロックは消えるだけ)
+                pass 
+            else:
+                # 通常時は反射する
+                self.vy *= -1
+            # --- ▲ ------------------ ▲ ---
             
+            # --- ▼ 戻り値を変更 ▼ ---
             # パーティクルエフェクトの生成（衝突したブロックの中心から）
             for _ in range(10):  # 10個のパーティクルを生成
                 particles.append(
@@ -176,18 +191,63 @@ class Ball:
             if break_sound is not None:
                 break_sound.play()
             
-            return True # ブロックに当たった
+            return True, block # ブロックに当たったことと、壊したブロックを返す
+            # --- ▲ ---------------- ▲ ---
         
-        return False # ブロックに当たらなかった
+        # --- ▼ アイテムタイマーの更新 ▼ ---
+        if self.is_large:
+            self.large_timer -= 1
+            if self.large_timer <= 0:
+                self.set_size(False) # 通常サイズに戻す
+        
+        if self.penetrate:
+            self.penetrate_timer -= 1
+            if self.penetrate_timer <= 0:
+                self.set_penetrate(False) # 通常状態に戻す
+        # --- ▲ ---------------------- ▲ ---
+        
+        # --- ▼ 戻り値を変更 ▼ ---
+        return False, None # ブロックに当たらなかった
+        # --- ▲ ---------------- ▲ ---
 
     def draw(self, screen):
         """ ボールを画面に描画 (円形) """
-        pg.draw.circle(screen, WHITE, self.rect.center, BALL_RADIUS)
+        # --- ▼ 状態に応じて描画を変更 ▼ ---
+        radius = BALL_RADIUS * 2 if self.is_large else BALL_RADIUS
+        color = GREEN if self.penetrate else WHITE
+        pg.draw.circle(screen, color, self.rect.center, radius)
+        # --- ▲ ------------------------- ▲ ---
 
     def is_out_of_bounds(self):
         """ ボールが画面下に落ちたか判定 """
         return self.rect.top > SCREEN_HEIGHT
 
+    # --- ▼ アイテム効果を適用するメソッドを追加 ▼ ---
+    def set_penetrate(self, value):
+        """ 貫通状態を設定する """
+        self.penetrate = value
+        if value:
+            self.penetrate_timer = 60 * 10 # 10秒間持続 (FPS=60)
+        else:
+            self.penetrate_timer = 0
+
+    def set_size(self, is_large):
+        """ ボールのサイズを変更する """
+        # サイズ変更時に中心がズレないように調整
+        center = self.rect.center
+        
+        self.is_large = is_large
+        if is_large:
+            # 巨大化
+            self.rect.width = BALL_RADIUS * 4
+            self.rect.height = BALL_RADIUS * 4
+            self.large_timer = 60 * 10 # 10秒間持続 (FPS=60)
+        else:
+            # 通常化
+            self.rect.width = BALL_RADIUS * 2
+            self.rect.height = BALL_RADIUS * 2
+        
+        self.rect.center = center # 中心を再設定
 
 class Block(pg.Rect):
     """ ブロックのクラス (pg.Rectを継承) """
@@ -198,6 +258,38 @@ class Block(pg.Rect):
     def draw(self, screen):
         """ ブロックを画面に描画 """
         pg.draw.rect(screen, self.color, self)
+
+
+class Item2(pg.Rect):
+    """ アイテムのクラス (pg.Rectを継承) """
+    def __init__(self, x, y, item_type):
+        self.item_type = item_type # "penetrate"（貫通） or "large_ball"（巨大化）
+        
+        # アイテムの種類によって色を変える
+        if self.item_type == "penetrate":
+            self.color = GREEN # 貫通アイテムは緑
+        elif self.item_type == "large_ball":
+            self.color = YELLOW # 巨大化アイテムは黄
+        
+        self.speed = 3 # 落下速度
+        
+        # アイテムのサイズ
+        item_width = 20
+        item_height = 20
+        # (x, y) はブロックの中心座標として受け取り、アイテムの中心に設定する
+        super().__init__(x - item_width // 2, y - item_height // 2, item_width, item_height)
+
+    def update(self):
+        """ アイテムを下に移動させる """
+        self.move_ip(0, self.speed)
+
+    def draw(self, screen):
+        """ アイテムを描画する（色分け） """
+        pg.draw.rect(screen, self.color, self)
+
+    def check_collision(self, paddle_rect):
+        """ ラケットとの衝突を判定する """
+        return self.colliderect(paddle_rect)
 
 # --- メイン処理 ---
 
@@ -231,16 +323,12 @@ def move_blocks_down(blocks: list[Block]) -> bool:
 
 def main():
     """ メインのゲームループ """
-    # 講義資料 P.8 のお作法 
-    # (画像など外部ファイルを読み込む際にパスの基準を固定する)
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
-    # Pygameの初期化
+    # ... (初期化、画面設定、フォント設定などはそのまま) ...
     pg.init()
     screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pg.display.set_caption("ブロック崩し")
     clock = pg.time.Clock()
-    font = pg.font.Font(None, 50) # スコア表示用フォント
+    font = pg.font.Font(None, 50) 
     
     # 効果音のロード
     sounds = load_sounds()
@@ -250,9 +338,13 @@ def main():
     ball = Ball()
     blocks = []
     particles = []  # パーティクルのリストを追加
+    # --- ▼ アイテムリストを追加 ▼ ---
+    items = [] # 落下中のアイテムを管理するリスト
+    # --- ▲ ------------------- ▲ ---
     
-    # 初期ブロックの配置（4行）
-    for y in range(4):
+    # ... (ブロックの配置 はそのまま) ...
+    block_colors = [RED, YELLOW, GREEN, BLUE]
+    for y in range(4): 
         blocks.extend(create_block_row(y * (BLOCK_HEIGHT + 5) + 30))
 
     score = 0
@@ -265,25 +357,56 @@ def main():
 
     # ゲームループ
     while True:
-        # イベント処理
+        # ... (イベント処理、リスタート処理はそのまま) ...
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 pg.quit()
                 sys.exit()
             if event.type == pg.KEYDOWN:
                 if event.key == pg.K_r and (game_over or game_clear):
-                    # ゲームオーバーかクリア時にRキーでリスタート
-                    main() # main関数を再帰呼び出ししてリセット
+                    main() 
                     return
 
         if not game_over and not game_clear:
-            # キー入力の取得
             keys = pg.key.get_pressed()
             
             # オブジェクトの更新
             paddle.update(keys)
-            if ball.update(paddle, blocks, particles, sounds.get("break")): # ブロックに当たったら
+            
+            # --- ▼ Ball.updateの戻り値の変更に対応 ▼ ---
+            block_hit, destroyed_block = ball.update(paddle, blocks, particles, sounds.get("break"))
+
+            if block_hit: # ブロックに当たったら
                 score += 10 # スコア加算
+
+                # --- ▼ アイテムドロップ処理 ▼ ---
+                # 30%の確率でアイテムをドロップ (確率は調整可能)
+                if random.random() < 0.3: 
+                    # 貫通か巨大化をランダムに選ぶ
+                    item_type = random.choice(["penetrate", "large_ball"])
+                    # 壊れたブロックの中心位置にアイテムを生成
+                    item = Item2(destroyed_block.centerx, destroyed_block.centery, item_type)
+                    items.append(item)
+                # --- ▲ ----------------------- ▲ ---
+            # --- ▲ -------------------------------- ▲ ---
+
+            # --- ▼ アイテムの更新とラケットとの衝突判定 ▼ ---
+            for item in items[:]: # リストのコピーをイテレート（削除処理のため）
+                item.update() # アイテムを落下
+                
+                # ラケットと衝突したら
+                if item.check_collision(paddle.rect):
+                    if item.item_type == "penetrate":
+                        ball.set_penetrate(True) # ボールを貫通状態に
+                    elif item.item_type == "large_ball":
+                        ball.set_size(True) # ボールを巨大化
+                    
+                    items.remove(item) # アイテムをリストから削除
+                
+                # 画面外に出たら削除
+                elif item.top > SCREEN_HEIGHT:
+                    items.remove(item)
+            # --- ▲ -------------------------------------- ▲ ---
 
             # パーティクルの更新
             particles[:] = [p for p in particles if p.update()]
@@ -314,7 +437,7 @@ def main():
                 game_clear = True
 
         # 描画処理
-        screen.fill(BLACK) # 背景を黒で塗りつぶし
+        screen.fill(BLACK) 
         
         # ゲームオーバーラインを描画（点線で表示）
         dash_length = 15  # 点線の長さ
@@ -331,11 +454,15 @@ def main():
         for particle in particles:
             particle.draw(screen)
 
-        # スコア表示
+        # --- ▼ アイテムの描画 ▼ ---
+        for item in items:
+            item.draw(screen)
+        # --- ▲ ----------------- ▲ ---
+
+        # ... (スコア表示、ゲームオーバー / クリア表示 はそのまま) ...
         score_text = font.render(f"SCORE: {score}", True, WHITE)
         screen.blit(score_text, (10, 10))
 
-        # ゲームオーバー / クリア表示
         if game_over:
             msg_text = font.render("GAME OVER", True, RED)
             screen.blit(msg_text, (SCREEN_WIDTH // 2 - msg_text.get_width() // 2, SCREEN_HEIGHT // 2 - 50))
@@ -349,10 +476,7 @@ def main():
             screen.blit(msg_text2, (SCREEN_WIDTH // 2 - msg_text2.get_width() // 2, SCREEN_HEIGHT // 2))
 
 
-        # 画面の更新
         pg.display.update()
-        
-        # フレームレートの制御
         clock.tick(FPS)
 
 if __name__ == "__main__":
